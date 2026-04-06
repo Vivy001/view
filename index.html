@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    <title>黑曜石極速備忘錄</title>
+    <style>
+        /* 1. 黑曜石風格定義 */
+        :root {
+            --bg-color: #1a1a1a;
+            --card-bg: rgba(40, 40, 40, 0.8);
+            --text-main: #ffffff;
+            --text-dim: #a0a0a0;
+            --accent: #3498db;
+            --danger: #e74c3c;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            overflow-x: hidden;
+            user-select: none;
+        }
+
+        /* 2. 輸入區設計 */
+        .input-section {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        #taskInput {
+            background: #222;
+            border: 1px solid #333;
+            border-radius: 12px;
+            color: white;
+            padding: 15px;
+            font-size: 18px;
+            outline: none;
+        }
+
+        #taskInput:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 8px rgba(52, 152, 219, 0.5);
+        }
+
+        .picker-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        input[type="datetime-local"] {
+            flex: 1;
+            background: #222;
+            border: 1px solid #333;
+            color: white;
+            padding: 12px;
+            border-radius: 10px;
+            font-size: 16px;
+        }
+
+        #addBtn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 15px;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 18px;
+            cursor: pointer;
+            active: transform: scale(0.95);
+        }
+
+        /* 3. 清單與旋轉飛出動畫 */
+        .list-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        #clearOldBtn {
+            background: none;
+            border: 1px solid var(--text-dim);
+            color: var(--text-dim);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+        }
+
+        .memo-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .memo-item {
+            background: var(--card-bg);
+            margin-bottom: 12px;
+            padding: 15px;
+            border-radius: 15px;
+            border-left: 4px solid var(--accent);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            transition: transform 0.1s;
+            touch-action: pan-y; /* 允許垂直滾動，水平留給 JS 處理 */
+        }
+
+        .memo-time {
+            font-size: 13px;
+            color: var(--text-dim);
+            margin-bottom: 5px;
+        }
+
+        .memo-content {
+            font-size: 18px;
+        }
+
+        /* 旋轉縮小飛出的動畫關鍵影格 */
+        @keyframes flyOut {
+            0% { transform: scale(1) rotate(0deg) translateX(0); opacity: 1; }
+            100% { transform: scale(0) rotate(720deg) translateX(-500px); opacity: 0; }
+        }
+
+        .fly-away {
+            animation: flyOut 0.6s ease-in forwards;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="input-section">
+        <input type="text" id="taskInput" placeholder="點擊手寫或語音輸入事項...">
+        <div class="picker-row">
+            <input type="datetime-local" id="taskTime">
+        </div>
+        <button id="addBtn">新增備忘錄</button>
+    </div>
+
+    <div class="list-header">
+        <h3 style="margin:0">待辦清單</h3>
+        <button id="clearOldBtn">🧹 清理過期</button>
+    </div>
+
+    <ul class="memo-list" id="memoList">
+        </ul>
+
+    <audio id="swooshSound" src="https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3"></audio>
+
+    <script>
+        const taskInput = document.getElementById('taskInput');
+        const taskTime = document.getElementById('taskTime');
+        const addBtn = document.getElementById('addBtn');
+        const memoList = document.getElementById('memoList');
+        const swooshSound = document.getElementById('swooshSound');
+        const clearOldBtn = document.getElementById('clearOldBtn');
+
+        // 預設時間設為現在
+        const now = new Date();
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        taskTime.value = now.toISOString().slice(0, 16);
+
+        // 新增功能
+        addBtn.addEventListener('click', () => {
+            if (!taskInput.value) return;
+            
+            const li = document.createElement('li');
+            li.className = 'memo-item';
+            li.dataset.time = taskTime.value;
+            li.innerHTML = `
+                <span class="memo-time">${taskTime.value.replace('T', ' ')}</span>
+                <span class="memo-content">${taskInput.value}</span>
+            `;
+            
+            // 綁定側滑刪除事件
+            addSwipeListener(li);
+            
+            memoList.prepend(li);
+            taskInput.value = '';
+        });
+
+        // 側滑偵測邏輯
+        function addSwipeListener(el) {
+            let startX = 0;
+            
+            el.addEventListener('touchstart', (e) => {
+                startX = e.touches[0].clientX;
+            });
+
+            el.addEventListener('touchmove', (e) => {
+                let moveX = e.touches[0].clientX - startX;
+                if (moveX < 0) { // 只允許向左滑
+                    el.style.transform = `translateX(${moveX}px)`;
+                }
+            });
+
+            el.addEventListener('touchend', (e) => {
+                let moveX = e.changedTouches[0].clientX - startX;
+                if (moveX < -150) { // 滑動超過 150px 觸發飛走
+                    triggerDelete(el);
+                } else {
+                    el.style.transform = `translateX(0)`; // 彈回
+                }
+            });
+        }
+
+        // 執行刪除動畫與聲音
+        function triggerDelete(el) {
+            el.classList.add('fly-away');
+            swooshSound.currentTime = 0;
+            swooshSound.play().catch(() => {}); // 避開瀏覽器自動播放限制
+            
+            setTimeout(() => {
+                el.remove();
+            }, 600);
+        }
+
+        // 快速清理過期事項
+        clearOldBtn.addEventListener('click', () => {
+            const nowTime = new Date().toISOString().slice(0, 16);
+            const items = document.querySelectorAll('.memo-item');
+            items.forEach(item => {
+                if (item.dataset.time < nowTime) {
+                    triggerDelete(item);
+                }
+            });
+        });
+    </script>
+</body>
+</html>
